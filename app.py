@@ -1,6 +1,11 @@
 from fastapi import FastAPI
+from database.config import engine, Base
+from models import CCTV, Event, Detection
 
 app = FastAPI(title="Traffic Control System", description="교통 관제 시스템 API")
+
+# Create all database tables
+Base.metadata.create_all(bind=engine)
 
 # Import routers from each module
 from fire.view.router import router as fire_router
