@@ -10,7 +10,7 @@ class Event(Base):
     event_type = Column(String(50), nullable=False)
     event_time = Column(TIMESTAMP, server_default=func.now())
     description = Column(Text)
-    metadata = Column(JSON)
+    event_metadata = Column("metadata", JSON)
 
     def __repr__(self):
         return f"<Event(id={self.id}, cctv_id={self.cctv_id}, event_type={self.event_type})>"
