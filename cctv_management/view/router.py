@@ -8,7 +8,7 @@ service = CctvManagementService()
 @router.get("/")
 async def list_cctvs(
     region: str | None = None,
-    limit: int = 50,
+    limit: int | None = None,
     min_x: float | None = None,
     max_x: float | None = None,
     min_y: float | None = None,

@@ -1,8 +1,7 @@
 import os
 import requests
-from datetime import datetime
-from models import Detection, Event
 from database.config import SessionLocal
+from database.event_repository import create_event_with_detection
 
 class TrafficJamService:
     def __init__(self):
@@ -71,27 +70,26 @@ class TrafficJamService:
                     road_name = item.get("roadName", "Unknown")
 
                     if congestion_level in ["heavy", "severe"] or (speed and speed < 20):
-                        detection = Detection(
-                            cctv_id=cctv_id,
-                            object_type="traffic_jam",
-                            detected_at=datetime.now()
-                        )
-                        self.db.add(detection)
-                        self.db.flush()
-
-                        event = Event(
-                            cctv_id=cctv_id,
+                        detection, event = create_event_with_detection(
+                            db=self.db,
+                            cctv_id=int(cctv_id),
                             event_type="traffic_jam",
-                            event_time=datetime.now(),
                             description=f"교통체증 감지: {road_name}",
-                            event_metadata={
+                            metadata={
                                 "congestion_level": congestion_level,
                                 "speed": speed,
-                                "road_name": road_name
+                                "road_name": road_name,
+                            },
+                            object_type="traffic_jam",
+                        )
+                        events.append(
+                            {
+                                "event_id": event.id,
+                                "detection_id": detection.id,
+                                "road": road_name,
+                                "level": congestion_level,
                             }
                         )
-                        self.db.add(event)
-                        events.append({"road": road_name, "level": congestion_level})
 
                 self.db.commit()
         except Exception as e:

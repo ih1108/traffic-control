@@ -1,7 +1,9 @@
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from database.config import engine, Base
 from models import CCTV, Event, Detection
 from sqlalchemy.exc import SQLAlchemyError
+import os
 
 app = FastAPI(title="Traffic Control System", description="교통 관제 시스템 API")
 
@@ -45,3 +47,25 @@ app.include_router(route_router, prefix="/routes", tags=["Route Feature"])
 @app.get("/")
 async def root():
     return {"message": "Traffic Control System API"}
+
+
+@app.get("/site")
+async def site_view():
+    return FileResponse("frontend.html")
+
+
+@app.get("/application")
+async def application_view():
+    return FileResponse("frontend.html")
+
+
+@app.get("/app")
+async def app_mobile_view():
+    return FileResponse("frontend.html")
+
+
+@app.get("/frontend/config")
+async def frontend_config():
+    return {
+        "kakao_map_js_key": os.getenv("KAKAO_MAP_JS_KEY", ""),
+    }

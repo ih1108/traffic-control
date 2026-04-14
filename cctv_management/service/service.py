@@ -3,6 +3,8 @@ from typing import Any
 
 import requests
 import xmltodict
+from database.config import SessionLocal
+from database.event_repository import ensure_cctv_exists
 
 
 class CctvManagementService:
@@ -20,7 +22,7 @@ class CctvManagementService:
     def list_cctvs(
         self,
         region: str | None = None,
-        limit: int = 50,
+        limit: int | None = None,
         min_x: float | None = None,
         max_x: float | None = None,
         min_y: float | None = None,
@@ -47,13 +49,18 @@ class CctvManagementService:
                 for item in normalized
                 if key in (item.get("location") or "").lower()
                 or key in (item.get("name") or "").lower()
+                or key in (item.get("search_text") or "").lower()
             ]
+
+        self._sync_cctvs_to_db(normalized)
+
+        items = normalized if limit is None else normalized[:limit]
 
         return {
             "ok": True,
             "source": "TAGO",
-            "count": len(normalized[:limit]),
-            "items": normalized[:limit],
+            "count": len(items),
+            "items": items,
         }
 
     def get_cctv_detail(self, cctv_id: int) -> dict[str, Any]:
@@ -69,6 +76,8 @@ class CctvManagementService:
 
         if target is None:
             return {"ok": False, "message": "해당 CCTV를 찾을 수 없음", "cctv_id": cctv_id}
+
+        self._sync_cctvs_to_db([target])
 
         return {"ok": True, "source": "TAGO", "item": target}
 
@@ -165,14 +174,44 @@ class CctvManagementService:
 
         return {
             "cctv_id": cctv_id,
-            "name": item.get("cctvName") or item.get("name") or item.get("cameraName"),
-            "location": item.get("location") or item.get("address") or item.get("cctvLocation"),
+            "name": item.get("cctvName") or item.get("cctvname") or item.get("name") or item.get("cameraName"),
+            "location": item.get("location") or item.get("address") or item.get("cctvLocation") or item.get("roadsectionid"),
             "stream_url": item.get("cctvurl") or item.get("streamUrl") or item.get("url"),
             "direction": item.get("direction") or item.get("direct") or item.get("cctvType"),
             "latitude": self._to_float(item.get("lat") or item.get("latitude") or item.get("coordy") or item.get("y")),
             "longitude": self._to_float(item.get("lon") or item.get("longitude") or item.get("coordx") or item.get("x")),
+            "search_text": " ".join(
+                [
+                    str(item.get("cctvName") or ""),
+                    str(item.get("cctvname") or ""),
+                    str(item.get("location") or ""),
+                    str(item.get("address") or ""),
+                    str(item.get("cctvLocation") or ""),
+                    str(item.get("roadsectionid") or ""),
+                ]
+            ),
             "raw": item,
         }
+
+    def _sync_cctvs_to_db(self, items: list[dict[str, Any]]) -> None:
+        db = SessionLocal()
+        try:
+            for item in items:
+                cctv_id = item.get("cctv_id")
+                if cctv_id is None:
+                    continue
+                ensure_cctv_exists(
+                    db,
+                    cctv_id=int(cctv_id),
+                    location=item.get("location") or item.get("name") or f"CCTV-{cctv_id}",
+                    stream_url=item.get("stream_url") or "about:blank",
+                    direction=item.get("direction") or "N/A",
+                )
+            db.commit()
+        except Exception:
+            db.rollback()
+        finally:
+            db.close()
 
     @staticmethod
     def _to_int(value: Any) -> int | None:

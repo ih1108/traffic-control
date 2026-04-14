@@ -3,7 +3,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Database connection URL
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/traffic_control")

@@ -11,4 +11,4 @@ class Detection(Base):
     detected_at = Column(TIMESTAMP, server_default=func.now())
 
     def __repr__(self):
-        return f"<Detection(id={self.id}, cctv_id={self.cctv_id}, object_type={self.object_type})>"
+        return f"<Detection(id={self.id}, cctv_id={self.cctv_id}, object_type={self.object_type})>"   
