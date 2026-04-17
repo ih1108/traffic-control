@@ -3,6 +3,29 @@ from database.event_repository import create_event_with_detection
 
 
 class AbandonedObjectService:
+    def detect_floating_object(self, cctv_id: int = 1):
+        db = SessionLocal()
+        try:
+            detection, event = create_event_with_detection(
+                db=db,
+                cctv_id=cctv_id,
+                event_type="floating_object",
+                description="도로 위 부유물 감지",
+                metadata={"source": "floating_object_service"},
+                object_type="floating_object",
+            )
+            db.commit()
+            return {
+                "message": "Floating object detected and event created",
+                "detection_id": detection.id,
+                "event_id": event.id,
+            }
+        except Exception as e:
+            db.rollback()
+            return {"message": "Floating object detection failed", "error": str(e)}
+        finally:
+            db.close()
+
     def detect_abandoned_object(self, cctv_id: int = 1):
         db = SessionLocal()
         try:

@@ -368,7 +368,6 @@
     <div class="title">교통 및 사고 관리 대시보드</div>
     <nav class="nav">
       <a id="linkWeb" href="/site">웹사이트</a>
-      <a id="linkApp" href="/app">어플리케이션</a>
       <a href="/docs" target="_blank" rel="noreferrer">API Docs</a>
     </nav>
   </header>
@@ -383,6 +382,7 @@
               <button id="scenarioFire" class="btn-danger">화재 감지 테스트</button>
               <button id="scenarioWrongWay">역주행 감지 테스트</button>
               <button id="scenarioTrafficJam">교통체증 감지 테스트</button>
+              <button id="scenarioFloating">부유물 감지 테스트</button>
               <button id="scenarioAbandoned">부화물 감지 테스트</button>
               <button id="scenarioEmergency">긴급차량 감지 테스트</button>
             </div>
@@ -511,6 +511,8 @@
               <button id="btnDetectFire" class="btn-danger">화재 감지 API</button>
               <button id="btnDetectJam">체증 감지 API</button>
               <button id="btnDetectWrong">역주행 감지 API</button>
+              <button id="btnDetectFloating">부유물 감지 API</button>
+              <button id="btnDetectAbandoned">부화물 감지 API</button>
               <button id="btnDetectEmergency">긴급차량 감지 API</button>
             </div>
             <div id="testResult" class="log"></div>
@@ -519,42 +521,6 @@
       </div>
     </section>
 
-    <section id="appView" class="hidden">
-      <div class="app-wrap">
-        <article class="phone">
-          <div class="phone-head">메인 지도 화면 <span class="muted" id="mapStatus">초기화중...</span></div>
-          <div class="phone-body">
-            <div id="appMap"></div>
-            <div class="control" style="margin-top:10px;">
-              <button id="btnMyLoc">내 위치</button>
-              <button id="btnNearby">주변 이벤트</button>
-            </div>
-          </div>
-        </article>
-
-        <article class="phone">
-          <div class="phone-head">알림 화면</div>
-          <div class="phone-body">
-            <div id="appAlerts"></div>
-          </div>
-        </article>
-
-        <article class="phone">
-          <div class="phone-head">길찾기 화면</div>
-          <div class="phone-body">
-            <div class="route-grid">
-              <input id="fromName" placeholder="출발지" value="현재위치" />
-              <input id="fromLat" placeholder="출발 위도" />
-              <input id="fromLng" placeholder="출발 경도" />
-              <input id="toName" placeholder="도착지" value="서울시청" />
-              <input id="toLat" placeholder="도착 위도" value="37.5665" />
-              <input id="toLng" placeholder="도착 경도" value="126.9780" />
-              <button id="btnRoute" class="btn-primary">카카오 길찾기 시작</button>
-            </div>
-          </div>
-        </article>
-      </div>
-    </section>
   </main>
 
   <div id="eventBanner" class="event-banner hidden"></div>
@@ -594,6 +560,11 @@
         label: "교통체증",
         endpoint: "/traffic-jam/detect",
         video: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4",
+      },
+      floating_object: {
+        label: "부유물",
+        endpoint: "/abandoned-object/detect-floating",
+        video: "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerFun.mp4",
       },
       abandoned_object: {
         label: "부화물",
@@ -687,36 +658,6 @@
         script.onerror = reject;
         document.head.appendChild(script);
       });
-    }
-
-    async function loadLeafletMap(reasonText) {
-      const status = document.getElementById("mapStatus");
-      const mapEl = document.getElementById("appMap");
-
-      try {
-        await ensureLeafletLibrary();
-        mapEl.innerHTML = "";
-
-        state.leafletMap = window.L.map("appMap").setView([37.5665, 126.9780], 12);
-        window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: '&copy; OpenStreetMap contributors',
-        }).addTo(state.leafletMap);
-
-        state.mapProvider = "leaflet";
-        status.textContent = "대체 지도(Leaflet) 사용 중";
-        updateMapMarkers();
-      } catch (_) {
-        status.textContent = "지도 로드 실패";
-        mapEl.innerHTML = `
-          <div style="height:100%;display:grid;place-items:center;padding:14px;text-align:center;background:#fff7ed;color:#7c2d12;border-radius:12px;">
-            <div>
-              <div style="font-weight:800;margin-bottom:8px;">지도 로딩 실패</div>
-              <div style="font-size:12px;line-height:1.5;">${reasonText}</div>
-              <div style="font-size:12px;margin-top:8px;">네트워크 또는 지도 스크립트 로딩 상태를 확인해주세요.</div>
-            </div>
-          </div>
-        `;
-      }
     }
 
     function destroyActiveHls() {
@@ -831,7 +772,7 @@
       }
 
       const keyword = (state.cctvKeyword || "").trim().toLowerCase();
-      const filtered = keyword
+      let filtered = keyword
         ? state.cctvs.filter((c) => {
             const idTxt = String(c.cctv_id || "");
             const nameTxt = String(c.name || "").toLowerCase();
@@ -839,6 +780,10 @@
             return idTxt.includes(keyword) || nameTxt.includes(keyword) || locTxt.includes(keyword);
           })
         : state.cctvs;
+
+      if (keyword && !filtered.length && state.cctvs.length) {
+        filtered = state.cctvs;
+      }
 
       if (!filtered.length) {
         list.innerHTML = '<div class="item">검색 결과 없음</div>';
@@ -848,7 +793,11 @@
       }
 
       for (const c of filtered) {
-        const text = `${c.name || "CCTV"} (${c.latitude?.toFixed?.(4) || "-"}, ${c.longitude?.toFixed?.(4) || "-"})`;
+        const lat = Number.parseFloat(c.latitude ?? c.lat ?? c.raw?.coordy ?? c.raw?.y);
+        const lng = Number.parseFloat(c.longitude ?? c.lon ?? c.lng ?? c.raw?.coordx ?? c.raw?.x);
+        const latTxt = Number.isFinite(lat) ? lat.toFixed(4) : "-";
+        const lngTxt = Number.isFinite(lng) ? lng.toFixed(4) : "-";
+        const text = `${c.name || "CCTV"} (${latTxt}, ${lngTxt})`;
         const div = document.createElement("div");
         div.className = "item";
         div.textContent = text;
@@ -882,10 +831,8 @@
     function renderEvents() {
       const list = document.getElementById("eventList");
       const recent = document.getElementById("recentEvents");
-      const appAlerts = document.getElementById("appAlerts");
       list.innerHTML = "";
       recent.innerHTML = "";
-      appAlerts.innerHTML = "";
 
       const rows = state.events.length ? state.events : normalizeEventRows({});
       for (const e of rows) {
@@ -899,11 +846,6 @@
         node2.className = "item";
         node2.textContent = line;
         recent.appendChild(node2);
-
-        const pill = document.createElement("div");
-        pill.className = "event-pill";
-        pill.innerHTML = `<span>${line}</span><span>></span>`;
-        appAlerts.appendChild(pill);
       }
     }
 
@@ -912,9 +854,9 @@
         const q = new URLSearchParams();
         if (state.cctvRegion) q.set("region", state.cctvRegion);
         const data = await apiGet(`/cctvs/?${q.toString()}`);
-        state.cctvs = data.items || [];
+        state.cctvs = Array.isArray(data.items) ? data.items : [];
         renderCctvList();
-        updateMapMarkers();
+        updateSiteMapMarkers();
       } catch (err) {
         state.cctvs = [];
         renderCctvList();
@@ -982,19 +924,13 @@
     }
 
     function showView() {
-      const isApp =
-        location.pathname.includes("/application") ||
-        location.pathname.includes("/app") ||
-        new URLSearchParams(location.search).get("view") === "app";
       const detailMode = new URLSearchParams(location.search).get("detail") === "1";
       state.siteMode = detailMode ? "detail" : "main";
 
-      document.getElementById("siteMainView").classList.toggle("hidden", isApp || detailMode);
-      document.getElementById("webView").classList.toggle("hidden", isApp || !detailMode);
-      document.getElementById("appView").classList.toggle("hidden", !isApp);
-      document.getElementById("linkWeb").classList.toggle("active", !isApp);
-      document.getElementById("linkApp").classList.toggle("active", isApp);
-      document.body.classList.toggle("app-mode", isApp);
+      document.getElementById("siteMainView").classList.toggle("hidden", detailMode);
+      document.getElementById("webView").classList.toggle("hidden", !detailMode);
+      document.getElementById("linkWeb").classList.add("active");
+      document.body.classList.remove("app-mode");
     }
 
     async function initSiteMainMap() {
@@ -1038,8 +974,10 @@
 
       const bounds = [];
       for (const c of state.cctvs) {
-        if (!c.latitude || !c.longitude) continue;
-        const marker = window.L.circleMarker([c.latitude, c.longitude], {
+        const lat = Number.parseFloat(c.latitude ?? c.lat ?? c.raw?.coordy ?? c.raw?.y);
+        const lng = Number.parseFloat(c.longitude ?? c.lon ?? c.lng ?? c.raw?.coordx ?? c.raw?.x);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+        const marker = window.L.circleMarker([lat, lng], {
           radius: 5,
           color: "#0f766e",
           weight: 2,
@@ -1049,7 +987,7 @@
         marker.bindTooltip(c.name || `CCTV ${c.cctv_id}`);
         marker.on("click", () => openSiteCctv(c));
         state.siteMapMarkers.push(marker);
-        bounds.push([c.latitude, c.longitude]);
+        bounds.push([lat, lng]);
       }
 
       if (bounds.length) {
@@ -1080,101 +1018,6 @@
       }
     }
 
-    async function loadKakaoMap() {
-      const status = document.getElementById("mapStatus");
-      const mapEl = document.getElementById("appMap");
-
-      function showMapFallback(reason) {
-        status.textContent = "지도 로드 실패";
-        mapEl.innerHTML = `
-          <div style="height:100%;display:grid;place-items:center;padding:14px;text-align:center;background:#fff7ed;color:#7c2d12;border-radius:12px;">
-            <div>
-              <div style="font-weight:800;margin-bottom:8px;">카카오 지도 로딩 실패</div>
-              <div style="font-size:12px;line-height:1.5;">${reason}</div>
-              <div style="font-size:12px;margin-top:8px;">현재 접속 주소(${location.origin})를 카카오 콘솔 허용 도메인에 등록해주세요.</div>
-              <div style="margin-top:10px;">
-                <a href="https://map.kakao.com/" target="_blank" rel="noreferrer" style="font-weight:700;color:#b45309;">카카오맵 열기</a>
-              </div>
-            </div>
-          </div>
-        `;
-      }
-
-      try {
-        const cfg = await apiGet("/frontend/config");
-        if (!cfg.kakao_map_js_key) {
-          await loadLeafletMap("KAKAO_MAP_JS_KEY 미설정으로 대체 지도를 사용합니다.");
-          return;
-        }
-
-        if (!window.kakao || !window.kakao.maps) {
-          await new Promise((resolve, reject) => {
-            const script = document.createElement("script");
-            script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${cfg.kakao_map_js_key}&autoload=false`;
-            script.onload = resolve;
-            script.onerror = reject;
-            document.head.appendChild(script);
-          });
-        }
-
-        if (!window.kakao || !window.kakao.maps) {
-          showMapFallback("카카오 스크립트가 로드되지 않았습니다.");
-          return;
-        }
-
-        await new Promise((resolve) => {
-          kakao.maps.load(() => {
-            state.kakaoLoaded = true;
-            state.mapProvider = "kakao";
-            const center = new kakao.maps.LatLng(37.5665, 126.9780);
-            state.map = new kakao.maps.Map(mapEl, { center, level: 7 });
-            status.textContent = "지도 준비 완료";
-            updateMapMarkers();
-            resolve();
-          });
-        });
-      } catch (err) {
-        const reason = err && err.message ? err.message : "원인 미상";
-        showMapFallback(reason);
-        await loadLeafletMap(`카카오 지도 실패(${reason})로 대체 지도를 사용합니다.`);
-      }
-    }
-
-    function updateMapMarkers() {
-      if (state.mapProvider === "kakao" && state.kakaoLoaded && state.map) {
-        for (const m of state.markers) m.setMap(null);
-        state.markers = [];
-
-        let first = null;
-        for (const c of state.cctvs.slice(0, 20)) {
-          if (!c.latitude || !c.longitude) continue;
-          const pos = new kakao.maps.LatLng(c.latitude, c.longitude);
-          const marker = new kakao.maps.Marker({ position: pos, map: state.map });
-          state.markers.push(marker);
-          if (!first) first = pos;
-        }
-        if (first) state.map.setCenter(first);
-        return;
-      }
-
-      if (state.mapProvider === "leaflet" && state.leafletMap && window.L) {
-        for (const m of state.leafletMarkers) {
-          state.leafletMap.removeLayer(m);
-        }
-        state.leafletMarkers = [];
-
-        let first = null;
-        for (const c of state.cctvs.slice(0, 20)) {
-          if (!c.latitude || !c.longitude) continue;
-          const marker = window.L.marker([c.latitude, c.longitude]).addTo(state.leafletMap);
-          marker.bindPopup(c.name || `CCTV ${c.cctv_id}`);
-          state.leafletMarkers.push(marker);
-          if (!first) first = [c.latitude, c.longitude];
-        }
-        if (first) state.leafletMap.setView(first, 13);
-      }
-    }
-
     function bindActions() {
       document.getElementById("btnLoadStream").onclick = loadStream;
       document.getElementById("btnRefresh").onclick = async () => {
@@ -1202,6 +1045,7 @@
       document.getElementById("scenarioFire").onclick = () => runScenario("fire");
       document.getElementById("scenarioWrongWay").onclick = () => runScenario("wrong_way");
       document.getElementById("scenarioTrafficJam").onclick = () => runScenario("traffic_jam");
+      document.getElementById("scenarioFloating").onclick = () => runScenario("floating_object");
       document.getElementById("scenarioAbandoned").onclick = () => runScenario("abandoned_object");
       document.getElementById("scenarioEmergency").onclick = () => runScenario("emergency_vehicle");
       document.getElementById("closeScenarioOverlay").onclick = () => closeScenarioOverlay();
@@ -1226,51 +1070,9 @@
       document.getElementById("btnDetectFire").onclick = () => callAndLog("/fire/detect", "화재 감지");
       document.getElementById("btnDetectJam").onclick = () => callAndLog("/traffic-jam/detect", "교통체증 감지");
       document.getElementById("btnDetectWrong").onclick = () => callAndLog("/wrong-way/detect", "역주행 감지");
+      document.getElementById("btnDetectFloating").onclick = () => callAndLog("/abandoned-object/detect-floating", "부유물 감지");
+      document.getElementById("btnDetectAbandoned").onclick = () => callAndLog("/abandoned-object/detect", "부화물 감지");
       document.getElementById("btnDetectEmergency").onclick = () => callAndLog("/emergency-vehicle/detect", "긴급차량 감지");
-
-      document.getElementById("btnMyLoc").onclick = () => {
-        if (!navigator.geolocation) return;
-        navigator.geolocation.getCurrentPosition((p) => {
-          document.getElementById("fromLat").value = p.coords.latitude.toFixed(6);
-          document.getElementById("fromLng").value = p.coords.longitude.toFixed(6);
-          if (state.mapProvider === "kakao" && state.kakaoLoaded && state.map) {
-            state.map.setCenter(new kakao.maps.LatLng(p.coords.latitude, p.coords.longitude));
-          } else if (state.mapProvider === "leaflet" && state.leafletMap) {
-            state.leafletMap.setView([p.coords.latitude, p.coords.longitude], 14);
-          }
-        });
-      };
-
-      document.getElementById("btnNearby").onclick = async () => {
-        try {
-          await apiGet("/location/nearby-events?distance_km=3");
-          alert("주변 이벤트 필터 API 연결 확인 완료");
-        } catch (err) {
-          alert(`주변 이벤트 API 실패: ${err.message}`);
-        }
-      };
-
-      document.getElementById("btnRoute").onclick = () => {
-        const fromName = document.getElementById("fromName").value || "출발지";
-        const fromLat = document.getElementById("fromLat").value;
-        const fromLng = document.getElementById("fromLng").value;
-        const toName = document.getElementById("toName").value || "도착지";
-        const toLat = document.getElementById("toLat").value;
-        const toLng = document.getElementById("toLng").value;
-
-        if (!toLat || !toLng) {
-          alert("도착 좌표를 입력해주세요.");
-          return;
-        }
-        if (!fromLat || !fromLng) {
-          window.open(`https://map.kakao.com/link/to/${encodeURIComponent(toName)},${toLat},${toLng}`, "_blank");
-          return;
-        }
-        window.open(
-          `https://map.kakao.com/link/from/${encodeURIComponent(fromName)},${fromLat},${fromLng}/to/${encodeURIComponent(toName)},${toLat},${toLng}`,
-          "_blank"
-        );
-      };
     }
 
     async function init() {
@@ -1279,9 +1081,6 @@
       await Promise.all([loadCctvs(), loadEvents(), loadNotifications()]);
       if (!document.getElementById("siteMainView").classList.contains("hidden")) {
         await initSiteMainMap();
-      }
-      if (!document.getElementById("appView").classList.contains("hidden")) {
-        await loadKakaoMap();
       }
 
       const wsUrl = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/events/ws`;

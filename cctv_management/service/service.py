@@ -5,6 +5,7 @@ import requests
 import xmltodict
 from database.config import SessionLocal
 from database.event_repository import ensure_cctv_exists
+from models import CCTV
 
 
 class CctvManagementService:
@@ -36,7 +37,14 @@ class CctvManagementService:
             max_y=max_y,
         )
         if payload is None:
-            return {"ok": False, "message": "CCTV 목록 조회 실패"}
+            cached = self._load_cctvs_from_db(region=region, limit=limit)
+            return {
+                "ok": True,
+                "source": "LOCAL_DB_FALLBACK",
+                "count": len(cached),
+                "items": cached,
+                "message": "TAGO 조회 실패로 로컬 캐시를 반환했습니다.",
+            }
 
         items = self._extract_items(payload)
         normalized = [self._normalize_item(item) for item in items]
@@ -66,6 +74,9 @@ class CctvManagementService:
     def get_cctv_detail(self, cctv_id: int) -> dict[str, Any]:
         payload = self._fetch_cctv_data(cctv_id=cctv_id)
         if payload is None:
+            cached = self._get_cctv_from_db(cctv_id)
+            if cached:
+                return {"ok": True, "source": "LOCAL_DB_FALLBACK", "item": cached}
             return {"ok": False, "message": "CCTV 상세 조회 실패", "cctv_id": cctv_id}
 
         items = [self._normalize_item(item) for item in self._extract_items(payload)]
@@ -97,12 +108,58 @@ class CctvManagementService:
 
         return {
             "ok": True,
-            "source": "TAGO",
+            "source": detail.get("source", "TAGO"),
             "cctv_id": item.get("cctv_id", cctv_id),
             "stream_url": stream_url,
             "name": item.get("name"),
             "location": item.get("location"),
         }
+
+    def _load_cctvs_from_db(self, region: str | None = None, limit: int | None = None) -> list[dict[str, Any]]:
+        db = SessionLocal()
+        try:
+            query = db.query(CCTV).order_by(CCTV.id.asc())
+            rows = query.all()
+            items = []
+            key = (region or "").lower().strip()
+            for row in rows:
+                item = {
+                    "cctv_id": row.id,
+                    "name": f"CCTV-{row.id}",
+                    "location": row.location,
+                    "stream_url": row.stream_url,
+                    "direction": row.direction,
+                    "latitude": None,
+                    "longitude": None,
+                    "search_text": f"{row.location or ''} CCTV-{row.id}",
+                    "raw": {},
+                }
+                if key and key not in (item["search_text"] or "").lower():
+                    continue
+                items.append(item)
+            return items if limit is None else items[:limit]
+        finally:
+            db.close()
+
+    def _get_cctv_from_db(self, cctv_id: int) -> dict[str, Any] | None:
+        db = SessionLocal()
+        try:
+            row = db.get(CCTV, cctv_id)
+            if not row:
+                return None
+            return {
+                "cctv_id": row.id,
+                "name": f"CCTV-{row.id}",
+                "location": row.location,
+                "stream_url": row.stream_url,
+                "direction": row.direction,
+                "latitude": None,
+                "longitude": None,
+                "search_text": f"{row.location or ''} CCTV-{row.id}",
+                "raw": {},
+            }
+        finally:
+            db.close()
 
     def _fetch_cctv_data(
         self,
